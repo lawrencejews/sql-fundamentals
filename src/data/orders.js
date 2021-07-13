@@ -1,7 +1,14 @@
 import { getDb } from '../db/utils';
 import { sql } from '../sql-string';
 
-export const ALL_ORDERS_COLUMNS = ['*'];
+export const ALL_ORDERS_COLUMNS = [
+  'id',
+  'customerid',
+  'employeeid',
+  'shipcity',
+  'shipcountry',
+  'shippeddate'
+];
 export const ORDER_COLUMNS = ['*'];
 
 /**
@@ -33,7 +40,7 @@ const DEFAULT_ORDER_COLLECTION_OPTIONS = Object.freeze(
  * @param {Partial<OrderCollectionOptions>} opts Options for customizing the query
  * @returns {Promise<Order[]>} the orders
  */
-export async function getAllOrders(opts = {}) {
+export async function getAllOrders(opts = {}, whereClause = '') {
   // Combine the options passed into the function with the defaults
 
   /** @type {OrderCollectionOptions} */
@@ -43,9 +50,23 @@ export async function getAllOrders(opts = {}) {
   };
 
   const db = await getDb();
+  let sortClause = '';
+  if (options.sort && options.order) {
+    sortClause = sql`ORDER BY co.${options.sort} ${options.order.toUpperCase()}`;
+  }
+
+  let paginationClause = '';
+  if (typeof options.page !== 'undefined' && options.perPage) {
+    paginationClause = sql`LIMIT ${options.perPage} OFFSET ${(options.page - 1) * options.perPage}`;
+  }
   return await db.all(sql`
-SELECT ${ALL_ORDERS_COLUMNS.join(',')}
-FROM CustomerOrder`);
+SELECT ${ALL_ORDERS_COLUMNS.map((x) => `co.${x}`).join(',')},
+c.companyname AS customername,
+e.lastname AS employeename
+FROM CustomerOrder ${whereClause}
+LEFT JOIN Customer AS c ON co.customerid = c.id
+LEFT JOIN Employee AS e co.employeeid = e.id
+${sortClause} ${paginationClause}`); // always sort then paginate.
 }
 
 /**
@@ -54,8 +75,16 @@ FROM CustomerOrder`);
  * @param {Partial<OrderCollectionOptions>} opts Options for customizing the query
  */
 export async function getCustomerOrders(customerId, opts = {}) {
-  // ! This is going to retrieve ALL ORDERS, not just the ones that belong to a particular customer. We'll need to fix this
-  return getAllOrders(opts);
+  let options = {
+    ...{
+      page: 1,
+      perPage: 20,
+      sort: 'shippeddate',
+      order: 'asc'
+    },
+    ...opts
+  };
+  return getAllOrders(opts, sql`WHERE customerid = '${customerId}'`);
 }
 
 /**
@@ -67,9 +96,16 @@ export async function getOrder(id) {
   const db = await getDb();
   return await db.get(
     sql`
-SELECT *
-FROM CustomerOrder
-WHERE id = $1`,
+SELECT co.*
+c.companyname AS customername,
+e.lastname AS employeename,
+sum((1 - od.discount) * od.unitprice * od.quantity) AS subtotal
+FROM CustomerOrder AS co
+LEFT JOIN Customer AS c On co.customerid = c.id
+LEFT JOIN Employee AS e ON co.employeeid = c.id
+LEFT JOIN OrderDetail AS od ON od.orderid = co.id
+WHERE co.id = $1
+GROUP BY co.id, c.companyname, e.lastname`,
     id
   );
 }
@@ -83,9 +119,10 @@ export async function getOrderDetails(id) {
   const db = await getDb();
   return await db.all(
     sql`
-SELECT *, unitprice * quantity as price
-FROM OrderDetail
-WHERE orderid = $1`,
+SELECT od.*, od.unitprice * od.quantity as price
+FROM OrderDetail AS od
+LEFT JOIN Product AS p ON od.productid = p.id
+WHERE od.orderid = $1`,
     id
   );
 }
