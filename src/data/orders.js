@@ -1,4 +1,4 @@
-import { getDb } from '../db/utils';
+import { DbType, getDb } from '../db/utils';
 import { sql } from '../sql-string';
 
 export const ALL_ORDERS_COLUMNS = [
@@ -144,8 +144,74 @@ export async function getOrderWithDetails(id) {
  * @param {Array<Pick<OrderDetail, 'productid' | 'quantity' | 'unitprice' | 'discount'>>} details data for any OrderDetail records to associate with this new CustomerOrder
  * @returns {Promise<{id: string}>} the newly created order
  */
+
 export async function createOrder(order, details = []) {
-  return Promise.reject('Orders#createOrder() NOT YET IMPLEMENTED');
+  const db = await getDb();
+  /** 
+employeeid: 3, 
+customerid: 'ALFKI',
+shipcity: 'Minneapolis, MN',
+shipaddress: ;60 South 6th St Suite 3625',
+shipname: 'Frontend Masters',
+shipvia: 1,
+shipregion:1,
+shipcountry: 'USA',
+shippostalcode: '455402',
+requireddate: '2018-03-22T23:38:08.410Z',
+freight
+*/
+  await db.run('BEGIN;');
+  try {
+    let result = await db.run(
+      sql`INSERT INTO CustomerOrder(
+employeeid, 
+customerid,
+shipcity ,
+shipaddress,
+shipname,
+shipvia,
+shipregion,
+shipcountry,
+shippostalcode,
+requireddate,
+freight) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+      order.employeeid,
+      order.customerid,
+      order.shipcity,
+      order.shipaddress,
+      order.shipname,
+      order.shipvia,
+      order.shipregion,
+      order.shipcountry,
+      order.shippostalcode,
+      order.requireddate,
+      order.freight
+    );
+
+    if (!result || typeof result.lastID === 'undefined')
+      throw new Error('Order insertion did not return an id!');
+    let ct = 1;
+    let orderId = result.lastID;
+    await Promise.all(
+      details.map((detail) => {
+        return db.run(
+          sql`INSERT INTO OrderDetail(id, orderid, unitprice, quantity, discount,productid), 
+    VALUES ($1,$2,$3,$4,$5,$6)`,
+          `${orderId}/${ct++}`,
+          orderId,
+          detail.unitprice,
+          detail.quantity,
+          detail.discount,
+          detail.productid
+        );
+      })
+    );
+    await db.run('COMMIT;');
+    return { id: result.lastID };
+  } catch (e) {
+    await db.run('ROLLBACK;');
+    throw e;
+  }
 }
 
 /**
@@ -154,7 +220,12 @@ export async function createOrder(order, details = []) {
  * @returns {Promise<any>}
  */
 export async function deleteOrder(id) {
-  return Promise.reject('Orders#deleteOrder() NOT YET IMPLEMENTED');
+  const db = await getDb();
+  return await db.run(
+    sql`DELETE FROM CustomerOrder
+    WHERE id = $1`,
+    id
+  );
 }
 
 /**
@@ -165,5 +236,63 @@ export async function deleteOrder(id) {
  * @returns {Promise<Partial<Order>>} the order
  */
 export async function updateOrder(id, data, details = []) {
-  return Promise.reject('Orders#updateOrder() NOT YET IMPLEMENTED');
+  const db = await getDb();
+  await db.run('BEGIN;');
+  try {
+    let result = await db.run(
+      sql`UPDATE CustomerOrder
+      SET employeeid = $1,
+          customerid = $2,
+          shipcity  = $3,
+          shipaddress = $4,
+          shipname = $5,
+          shipvia = $6,
+          shipregion = $7,
+          shipcountry = $8,
+          shippostalcode = $9,
+          requireddate = $10,
+          freight = $11,  WHERE id = $12`,
+      data.employeeid,
+      data.customerid,
+      data.shipcity,
+      data.shipaddress,
+      data.shipname,
+      data.shipvia,
+      data.shipregion,
+      data.shipcountry,
+      data.shippostalcode,
+      data.requireddate,
+      data.freight,
+      id
+    );
+
+    if (!result || typeof result.lastID === 'undefined')
+      throw new Error('Order insertion did not return an id!');
+    let ct = 1;
+    let orderId = result.lastID;
+    await Promise.all(
+      details.map((detail) => {
+        return db.run(
+          sql`UPDATE OrderDetail
+          SET unitprice = $1,
+              quantity = $2,
+              discount = $3,
+              productid = $4,
+          WHERE id = $5`,
+          `${orderId}/${ct++}`,
+          orderId,
+          detail.unitprice,
+          detail.quantity,
+          detail.discount,
+          detail.productid,
+          detail.id
+        );
+      })
+    );
+    await db.run('COMMIT;');
+    return { id: result.lastID };
+  } catch (e) {
+    await db.run('ROLLBACK;');
+    throw e;
+  }
 }
